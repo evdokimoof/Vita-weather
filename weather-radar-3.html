@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vita Weather · Погода и радар</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  :root{
+    --bg:#0a0e14;
+    --bg-panel:rgba(18,24,34,0.72);
+    --bg-panel-solid:#121822;
+    --ink:#e8eef5;
+    --ink-dim:#8b9bb0;
+    --ink-faint:#566375;
+    --accent:#4dd0e1;
+    --accent-warm:#ffb74d;
+    --accent-rain:#5c9eff;
+    --line:rgba(255,255,255,0.07);
+    --line-strong:rgba(255,255,255,0.14);
+    --radius:18px;
+    --shadow:0 20px 60px -20px rgba(0,0,0,0.7);
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    font-family:'Sora',sans-serif;
+    background:
+      radial-gradient(1200px 800px at 85% -10%, rgba(77,208,225,0.10), transparent 55%),
+      radial-gradient(900px 700px at 5% 110%, rgba(92,158,255,0.10), transparent 50%),
+      var(--bg);
+    color:var(--ink);
+    min-height:100vh;
+    overflow-x:hidden;
+  }
+
+  .app{
+    max-width:1380px;
+    margin:0 auto;
+    padding:28px clamp(16px,3vw,40px) 60px;
+  }
+
+  /* ---------- Header ---------- */
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+    flex-wrap:wrap;
+    margin-bottom:26px;
+  }
+  .brand{display:flex;align-items:center;gap:14px;}
+  .brand .mark{
+    width:46px;height:46px;border-radius:13px;
+    background:linear-gradient(135deg,var(--accent),var(--accent-rain));
+    display:grid;place-items:center;
+    box-shadow:0 8px 24px -6px rgba(77,208,225,0.5);
+    position:relative;overflow:hidden;
+  }
+  .brand .mark svg{width:26px;height:26px;}
+  .brand h1{
+    font-size:1.35rem;font-weight:700;letter-spacing:-0.02em;
+    line-height:1;
+  }
+  .brand span{
+    display:block;font-family:'Space Mono',monospace;
+    font-size:0.66rem;letter-spacing:0.28em;text-transform:uppercase;
+    color:var(--ink-faint);margin-top:5px;
+  }
+
+  .search{
+    display:flex;align-items:center;gap:8px;
+    background:var(--bg-panel);
+    border:1px solid var(--line-strong);
+    border-radius:14px;
+    padding:6px 6px 6px 16px;
+    backdrop-filter:blur(14px);
+    position:relative;
+    min-width:min(360px,90vw);
+    z-index:2000;
+  }
+  .search svg{width:18px;height:18px;color:var(--ink-dim);flex-shrink:0;}
+  .search input{
+    background:transparent;border:none;outline:none;
+    color:var(--ink);font-family:inherit;font-size:0.95rem;
+    width:100%;padding:8px 4px;
+  }
+  .search input::placeholder{color:var(--ink-faint);}
+  .search button{
+    border:none;cursor:pointer;font-family:inherit;
+    background:var(--accent);color:#06222a;font-weight:600;
+    padding:9px 16px;border-radius:10px;font-size:0.9rem;
+    transition:transform .15s, background .15s;
+    white-space:nowrap;
+  }
+  .search button:hover{background:#5fdfee;transform:translateY(-1px);}
+  .geo-btn{
+    background:var(--bg-panel)!important;color:var(--ink)!important;
+    border:1px solid var(--line-strong)!important;
+    width:42px;padding:0!important;height:42px;display:grid;place-items:center;
+  }
+  .geo-btn:hover{background:var(--line-strong)!important;}
+  .geo-btn svg{width:18px;height:18px;margin:0;color:var(--accent);}
+
+  .suggestions{
+    position:fixed;
+    background:var(--bg-panel-solid);
+    border:1px solid var(--line-strong);
+    border-radius:12px;overflow:hidden;z-index:5000;
+    box-shadow:var(--shadow);display:none;
+  }
+  .suggestions.show{display:block;}
+  .suggestions div{
+    padding:11px 16px;cursor:pointer;font-size:0.9rem;
+    border-bottom:1px solid var(--line);transition:background .12s;
+  }
+  .suggestions div:last-child{border-bottom:none;}
+  .suggestions div:hover{background:rgba(77,208,225,0.12);}
+  .suggestions .sub{color:var(--ink-faint);font-size:0.78rem;margin-left:6px;}
+
+  /* ---------- Layout ---------- */
+  .grid{
+    display:grid;
+    grid-template-columns:380px 1fr;
+    gap:22px;
+    align-items:start;
+  }
+  @media(max-width:920px){
+    .grid{grid-template-columns:1fr;}
+  }
+
+  .panel{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    backdrop-filter:blur(16px);
+    box-shadow:var(--shadow);
+  }
+
+  /* ---------- Current weather card ---------- */
+  .current{padding:26px;position:relative;overflow:hidden;}
+  .current::before{
+    content:"";position:absolute;inset:0;
+    background:radial-gradient(400px 200px at 100% 0%, rgba(77,208,225,0.12), transparent 60%);
+    pointer-events:none;
+  }
+  .loc-name{font-size:1.45rem;font-weight:600;letter-spacing:-0.02em;}
+  .loc-sub{color:var(--ink-dim);font-size:0.85rem;margin-top:3px;
+    font-family:'Space Mono',monospace;}
+  .now-main{
+    display:flex;align-items:center;gap:18px;margin:22px 0 8px;
+  }
+  .now-icon{font-size:4rem;line-height:1;filter:drop-shadow(0 4px 14px rgba(0,0,0,0.4));}
+  .now-temp{font-size:4.2rem;font-weight:300;letter-spacing:-0.04em;line-height:0.9;}
+  .now-temp sup{font-size:1.6rem;font-weight:400;color:var(--ink-dim);top:-1.4em;}
+  .now-desc{font-size:1rem;color:var(--ink);margin-bottom:4px;text-transform:capitalize;}
+  .now-feels{color:var(--ink-dim);font-size:0.85rem;}
+
+  .metrics{
+    display:grid;grid-template-columns:repeat(2,1fr);gap:10px;
+    margin-top:22px;
+  }
+  .metric{
+    background:rgba(255,255,255,0.03);
+    border:1px solid var(--line);
+    border-radius:12px;padding:13px 14px;
+  }
+  .metric .label{
+    font-family:'Space Mono',monospace;font-size:0.62rem;
+    letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-faint);
+    display:flex;align-items:center;gap:6px;
+  }
+  .metric .label svg{width:13px;height:13px;}
+  .metric .val{font-size:1.25rem;font-weight:600;margin-top:6px;}
+  .metric .val small{font-size:0.75rem;color:var(--ink-dim);font-weight:400;}
+
+  /* ---------- Forecast ---------- */
+  .section-title{
+    font-family:'Space Mono',monospace;font-size:0.68rem;
+    letter-spacing:0.22em;text-transform:uppercase;color:var(--ink-dim);
+    padding:20px 22px 0;display:flex;align-items:center;gap:8px;
+  }
+  .section-title::after{content:"";flex:1;height:1px;background:var(--line);}
+
+  .hourly{
+    display:flex;gap:8px;overflow-x:auto;padding:14px 22px 22px;
+    scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;
+  }
+  .hourly::-webkit-scrollbar{height:6px;}
+  .hourly::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px;}
+  .hour{
+    flex:0 0 auto;text-align:center;min-width:62px;
+    background:rgba(255,255,255,0.03);border:1px solid var(--line);
+    border-radius:12px;padding:12px 8px;
+  }
+  .hour .t{font-family:'Space Mono',monospace;font-size:0.72rem;color:var(--ink-dim);}
+  .hour .i{font-size:1.5rem;margin:6px 0;}
+  .hour .d{font-size:0.95rem;font-weight:600;}
+  .hour .p{font-size:0.65rem;color:var(--accent-rain);margin-top:3px;
+    font-family:'Space Mono',monospace;min-height:0.9em;}
+
+  .daily{padding:6px 22px 22px;}
+  .day{
+    display:grid;grid-template-columns:1.4fr 0.5fr 1fr;
+    align-items:center;gap:10px;padding:12px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .day:last-child{border-bottom:none;}
+  .day .name{font-size:0.92rem;font-weight:500;}
+  .day .name small{display:block;color:var(--ink-faint);font-size:0.72rem;
+    font-family:'Space Mono',monospace;}
+  .day .ic{font-size:1.5rem;text-align:center;}
+  .day .range{display:flex;align-items:center;gap:10px;justify-content:flex-end;}
+  .day .hi{font-weight:600;}
+  .day .lo{color:var(--ink-faint);}
+  .bar{
+    flex:1;max-width:70px;height:4px;border-radius:2px;
+    background:linear-gradient(90deg,var(--accent-rain),var(--accent-warm));
+    opacity:0.6;
+  }
+
+  /* ---------- Map / radar ---------- */
+  .map-wrap{position:relative;overflow:hidden;border-radius:var(--radius);
+    min-height:560px;height:100%;}
+  #map{position:absolute;inset:0;background:#0d1420;}
+  .leaflet-container{background:#0d1420;font-family:'Sora',sans-serif;}
+  .leaflet-control-attribution{
+    background:rgba(10,14,20,0.7)!important;color:var(--ink-faint)!important;
+    font-size:9px!important;
+  }
+  .leaflet-control-attribution a{color:var(--ink-dim)!important;}
+  .leaflet-bar a{background:var(--bg-panel-solid)!important;color:var(--ink)!important;
+    border-color:var(--line)!important;}
+  .leaflet-bar a:hover{background:var(--line-strong)!important;}
+
+  .radar-ui{
+    position:absolute;left:16px;right:16px;bottom:16px;z-index:1000;
+    background:var(--bg-panel);border:1px solid var(--line-strong);
+    border-radius:14px;padding:14px 16px;backdrop-filter:blur(18px);
+    box-shadow:var(--shadow);
+  }
+  .radar-top{display:flex;align-items:center;gap:14px;margin-bottom:10px;}
+  .play{
+    width:42px;height:42px;border-radius:11px;border:none;cursor:pointer;
+    background:var(--accent-rain);color:#03132e;display:grid;place-items:center;
+    flex-shrink:0;transition:transform .15s,background .15s;
+  }
+  .play:hover{transform:scale(1.05);background:#73adff;}
+  .play svg{width:20px;height:20px;}
+  .radar-time{font-family:'Space Mono',monospace;font-size:0.95rem;font-weight:700;}
+  .radar-label{font-family:'Space Mono',monospace;font-size:0.6rem;
+    letter-spacing:0.2em;text-transform:uppercase;color:var(--ink-faint);}
+  .radar-tag{
+    margin-left:auto;font-family:'Space Mono',monospace;font-size:0.62rem;
+    letter-spacing:0.14em;text-transform:uppercase;
+    color:var(--accent-rain);border:1px solid rgba(92,158,255,0.4);
+    padding:4px 9px;border-radius:20px;
+  }
+  .radar-tag.live{color:var(--accent);border-color:rgba(77,208,225,0.4);}
+  input[type=range]{
+    -webkit-appearance:none;width:100%;height:5px;border-radius:3px;
+    background:var(--line-strong);outline:none;cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--accent-rain);border:2px solid var(--bg-panel-solid);
+    box-shadow:0 0 0 1px var(--accent-rain);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px;height:16px;border-radius:50%;background:var(--accent-rain);
+    border:2px solid var(--bg-panel-solid);cursor:pointer;
+  }
+  .radar-scale{
+    display:flex;align-items:center;gap:6px;margin-top:11px;
+    font-family:'Space Mono',monospace;font-size:0.58rem;color:var(--ink-faint);
+  }
+  .radar-scale .gradient{
+    flex:1;height:6px;border-radius:3px;
+    background:linear-gradient(90deg,#1a4d8f,#3a8fd6,#4fd17a,#f2d94e,#f29a4e,#e8504e);
+  }
+
+  /* ---------- Loading / status ---------- */
+  .status{
+    position:fixed;top:18px;left:50%;transform:translateX(-50%);
+    background:var(--bg-panel-solid);border:1px solid var(--line-strong);
+    padding:10px 20px;border-radius:30px;font-size:0.85rem;z-index:3000;
+    box-shadow:var(--shadow);display:none;align-items:center;gap:10px;
+  }
+  .status.show{display:flex;}
+  .spinner{
+    width:15px;height:15px;border:2px solid var(--line-strong);
+    border-top-color:var(--accent);border-radius:50%;
+    animation:spin .7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .skeleton{color:var(--ink-faint);font-size:0.9rem;}
+
+  footer{
+    text-align:center;margin-top:30px;color:var(--ink-faint);
+    font-family:'Space Mono',monospace;font-size:0.72rem;letter-spacing:0.06em;
+  }
+  footer a{color:var(--ink-dim);text-decoration:none;}
+  footer a:hover{color:var(--accent);}
+
+  .fade-in{animation:fade .5s ease both;}
+  @keyframes fade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+</style>
+</head>
+<body>
+<div class="status" id="status"><div class="spinner"></div><span id="statusText">Загрузка…</span></div>
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#06222a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6-1.5A4 4 0 0 0 6 19z"/>
+          <line x1="8" y1="22" x2="8" y2="20"/><line x1="12" y1="23" x2="12" y2="21"/><line x1="16" y1="22" x2="16" y2="20"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Vita Weather</h1>
+        <span>Погода · Радар осадков</span>
+      </div>
+    </div>
+
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="searchInput" type="text" placeholder="Введите город…" autocomplete="off">
+      <button class="geo-btn" id="geoBtn" title="Моё местоположение">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+      </button>
+      <button id="searchBtn">Найти</button>
+      <div class="suggestions" id="suggestions"></div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- LEFT COLUMN -->
+    <div style="display:flex;flex-direction:column;gap:22px;">
+      <div class="panel current" id="currentCard">
+        <div class="loc-name" id="locName">—</div>
+        <div class="loc-sub" id="locSub">Определяем местоположение…</div>
+        <div class="now-main">
+          <div class="now-icon" id="nowIcon">⏳</div>
+          <div class="now-temp" id="nowTemp">--<sup>°</sup></div>
+        </div>
+        <div class="now-desc" id="nowDesc">—</div>
+        <div class="now-feels" id="nowFeels">Ощущается как --°</div>
+        <div class="metrics" id="metrics"></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-title">Прогноз на 7 дней</div>
+        <div class="daily" id="daily"><div class="skeleton" style="padding:14px 0;">Загрузка прогноза…</div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div style="display:flex;flex-direction:column;gap:22px;">
+      <div class="panel" style="overflow:hidden;">
+        <div class="section-title">Почасовой прогноз</div>
+        <div class="hourly" id="hourly"><div class="skeleton" style="padding:14px 0;">…</div></div>
+      </div>
+
+      <div class="panel map-wrap">
+        <div id="map"></div>
+        <div class="radar-ui">
+          <div class="radar-top">
+            <button class="play" id="playBtn">
+              <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <div>
+              <div class="radar-label">Время кадра</div>
+              <div class="radar-time" id="radarTime">--:--</div>
+            </div>
+            <div class="radar-tag" id="radarTag">Радар</div>
+          </div>
+          <input type="range" id="radarSlider" min="0" max="0" value="0">
+          <div class="radar-scale">
+            <span>слабо</span>
+            <div class="gradient"></div>
+            <span>ливень</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Данные: <a href="https://open-meteo.com" target="_blank">Open-Meteo</a> ·
+    Радар: <a href="https://rainviewer.com" target="_blank">RainViewer</a> ·
+    Карта: <a href="https://openstreetmap.org" target="_blank">OpenStreetMap</a>
+    &nbsp;·&nbsp; Без ключей API
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   VITA WEATHER — погода + радар на бесплатных API
+   Open-Meteo (погода), RainViewer (радар), Leaflet+OSM (карта)
+   ============================================================ */
+
+const $ = id => document.getElementById(id);
+const statusEl = $('status'), statusText = $('statusText');
+let showStatus = (t)=>{statusText.textContent=t;statusEl.classList.add('show');};
+let hideStatus = ()=>statusEl.classList.remove('show');
+
+/* ---- WMO weather codes -> emoji + текст ---- */
+const WMO = {
+  0:['☀️','Ясно'],1:['🌤️','Преимущественно ясно'],2:['⛅','Переменная облачность'],
+  3:['☁️','Пасмурно'],45:['🌫️','Туман'],48:['🌫️','Изморозь'],
+  51:['🌦️','Морось слабая'],53:['🌦️','Морось'],55:['🌦️','Морось сильная'],
+  56:['🌧️','Ледяная морось'],57:['🌧️','Ледяная морось'],
+  61:['🌧️','Дождь слабый'],63:['🌧️','Дождь'],65:['🌧️','Дождь сильный'],
+  66:['🌧️','Ледяной дождь'],67:['🌧️','Ледяной дождь'],
+  71:['🌨️','Снег слабый'],73:['🌨️','Снег'],75:['❄️','Снег сильный'],
+  77:['🌨️','Снежная крупа'],
+  80:['🌦️','Ливень слабый'],81:['🌧️','Ливень'],82:['⛈️','Ливень сильный'],
+  85:['🌨️','Снегопад'],86:['❄️','Снегопад сильный'],
+  95:['⛈️','Гроза'],96:['⛈️','Гроза с градом'],99:['⛈️','Гроза с градом']
+};
+const wmo = c => WMO[c] || ['❓','—'];
+
+/* ---- Map setup ---- */
+let map = L.map('map',{zoomControl:true,attributionControl:true}).setView([56.95,24.11],6);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'© OpenStreetMap, © CARTO', maxZoom:19, subdomains:'abcd'
+}).addTo(map);
+let marker = null;
+
+/* ---- Radar state ---- */
+let radarFrames=[], radarLayers={}, radarIdx=0, radarTimer=null, radarHost='';
+const RADAR_OPACITY=0.65, RADAR_COLOR=4, RADAR_SMOOTH=1, RADAR_SNOW=1;
+
+async function loadRadar(){
+  try{
+    const r = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+    const d = await r.json();
+    radarHost = d.host;
+    const past = d.radar.past || [];
+    const nowcast = d.radar.nowcast || [];
+    radarFrames = [...past, ...nowcast];
+    $('radarSlider').max = radarFrames.length-1;
+    // показываем последний "прошлый" кадр (текущий момент)
+    radarIdx = Math.max(0, past.length-1);
+    $('radarSlider').value = radarIdx;
+    Object.values(radarLayers).forEach(l=>map.removeLayer(l));
+    radarLayers={};
+    showRadarFrame(radarIdx);
+  }catch(e){
+    console.error('Radar error',e);
+    $('radarTag').textContent='радар недоступен';
+  }
+}
+
+function radarLayer(i){
+  if(radarLayers[i]) return radarLayers[i];
+  const f = radarFrames[i];
+  const url = `${radarHost}${f.path}/256/{z}/{x}/{y}/${RADAR_COLOR}/${RADAR_SMOOTH}_${RADAR_SNOW}.png`;
+  const layer = L.tileLayer(url,{opacity:0,zIndex:500,tileSize:256});
+  layer.addTo(map);
+  radarLayers[i]=layer;
+  return layer;
+}
+
+function showRadarFrame(i){
+  if(!radarFrames.length) return;
+  radarIdx = i;
+  // прячем все, показываем нужный
+  Object.entries(radarLayers).forEach(([k,l])=>l.setOpacity(0));
+  radarLayer(i).setOpacity(RADAR_OPACITY);
+  // прелоад соседнего
+  if(i+1<radarFrames.length) radarLayer(i+1).setOpacity(0);
+
+  const f = radarFrames[i];
+  const dt = new Date(f.time*1000);
+  $('radarTime').textContent = dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  $('radarSlider').value = i;
+  // future frame?
+  const isFuture = f.time*1000 > Date.now();
+  const tag=$('radarTag');
+  if(isFuture){tag.textContent='прогноз';tag.classList.remove('live');}
+  else{tag.textContent='наблюдение';tag.classList.add('live');}
+}
+
+let playing=false;
+function togglePlay(){
+  playing=!playing;
+  $('playIcon').innerHTML = playing
+    ? '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>'
+    : '<path d="M8 5v14l11-7z"/>';
+  if(playing){
+    radarTimer=setInterval(()=>{
+      let n=(radarIdx+1)%radarFrames.length;
+      showRadarFrame(n);
+    },650);
+  }else clearInterval(radarTimer);
+}
+$('playBtn').onclick=togglePlay;
+$('radarSlider').oninput=e=>{
+  if(playing) togglePlay();
+  showRadarFrame(+e.target.value);
+};
+
+/* ---- Weather fetch (Open-Meteo) ---- */
+async function loadWeather(lat,lon,label,sub){
+  showStatus('Загрузка погоды…');
+  try{
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
+      `&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m`+
+      `&hourly=temperature_2m,precipitation_probability,weather_code`+
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset`+
+      `&timezone=auto&forecast_days=7`;
+    const res = await fetch(url);
+    const d = await res.json();
+    renderCurrent(d,label,sub);
+    renderHourly(d);
+    renderDaily(d);
+    hideStatus();
+  }catch(e){
+    console.error(e);
+    showStatus('Ошибка загрузки. Проверьте интернет.');
+    setTimeout(hideStatus,3000);
+  }
+}
+
+function windDir(deg){
+  const dirs=['С','С-В','В','Ю-В','Ю','Ю-З','З','С-З'];
+  return dirs[Math.round(deg/45)%8];
+}
+
+function renderCurrent(d,label,sub){
+  const c=d.current, [ic,desc]=wmo(c.weather_code);
+  $('locName').textContent=label;
+  $('locSub').textContent=sub||`${(+d.latitude).toFixed(2)}, ${(+d.longitude).toFixed(2)}`;
+  $('nowIcon').textContent=ic;
+  $('nowTemp').innerHTML=`${Math.round(c.temperature_2m)}<sup>°C</sup>`;
+  $('nowDesc').textContent=desc;
+  $('nowFeels').textContent=`Ощущается как ${Math.round(c.apparent_temperature)}°`;
+  const m=[
+    ['💨','Ветер',`${Math.round(c.wind_speed_10m)} <small>км/ч ${windDir(c.wind_direction_10m)}</small>`],
+    ['💧','Влажность',`${c.relative_humidity_2m}<small>%</small>`],
+    ['🌡️','Давление',`${Math.round(c.surface_pressure*0.750062)} <small>мм рт.ст.</small>`],
+    ['🌧️','Осадки',`${c.precipitation} <small>мм</small>`]
+  ];
+  $('metrics').innerHTML=m.map(([i,l,v])=>
+    `<div class="metric"><div class="label">${i} ${l}</div><div class="val">${v}</div></div>`
+  ).join('');
+  $('currentCard').classList.remove('fade-in');void $('currentCard').offsetWidth;
+  $('currentCard').classList.add('fade-in');
+}
+
+function renderHourly(d){
+  const h=d.hourly, now=new Date();
+  // найдём индекс текущего часа
+  let start=h.time.findIndex(t=>new Date(t)>=now);
+  if(start<0)start=0; start=Math.max(0,start-1);
+  let html='';
+  for(let i=start;i<start+24 && i<h.time.length;i++){
+    const dt=new Date(h.time[i]);
+    const [ic]=wmo(h.weather_code[i]);
+    const prob=h.precipitation_probability[i];
+    html+=`<div class="hour">
+      <div class="t">${dt.getHours().toString().padStart(2,'0')}:00</div>
+      <div class="i">${ic}</div>
+      <div class="d">${Math.round(h.temperature_2m[i])}°</div>
+      <div class="p">${prob>5?prob+'%':''}</div>
+    </div>`;
+  }
+  $('hourly').innerHTML=html;
+}
+
+function renderDaily(d){
+  const dy=d.daily;
+  const days=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+  const months=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+  let html='';
+  for(let i=0;i<dy.time.length;i++){
+    const dt=new Date(dy.time[i]);
+    const [ic,desc]=wmo(dy.weather_code[i]);
+    const name=i===0?'Сегодня':days[dt.getDay()];
+    const prob=dy.precipitation_probability_max[i];
+    html+=`<div class="day">
+      <div class="name">${name}<small>${dt.getDate()} ${months[dt.getMonth()]} · ${desc}${prob>5?' · 💧'+prob+'%':''}</small></div>
+      <div class="ic">${ic}</div>
+      <div class="range">
+        <span class="lo">${Math.round(dy.temperature_2m_min[i])}°</span>
+        <span class="bar"></span>
+        <span class="hi">${Math.round(dy.temperature_2m_max[i])}°</span>
+      </div>
+    </div>`;
+  }
+  $('daily').innerHTML=html;
+}
+
+/* ---- Geocoding (Open-Meteo) ---- */
+async function geocode(name){
+  const url=`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=6&language=ru&format=json`;
+  const r=await fetch(url); const d=await r.json();
+  return d.results||[];
+}
+
+function setLocation(lat,lon,label,sub,zoom=8){
+  map.flyTo([lat,lon],zoom,{duration:1.1});
+  if(marker)map.removeLayer(marker);
+  marker=L.circleMarker([lat,lon],{
+    radius:7,color:'#4dd0e1',fillColor:'#4dd0e1',fillOpacity:0.9,weight:3,opacity:0.4
+  }).addTo(map);
+  loadWeather(lat,lon,label,sub);
+}
+
+/* ---- Search UI ---- */
+const sInput=$('searchInput'), sugg=$('suggestions');
+let sTimer=null;
+
+sInput.addEventListener('input',()=>{
+  clearTimeout(sTimer);
+  const q=sInput.value.trim();
+  if(q.length<2){sugg.classList.remove('show');return;}
+  sTimer=setTimeout(async()=>{
+    const res=await geocode(q);
+    if(!res.length){sugg.classList.remove('show');return;}
+    sugg.innerHTML=res.map(r=>{
+      const parts=[r.admin1,r.country].filter(Boolean).join(', ');
+      return `<div data-lat="${r.latitude}" data-lon="${r.longitude}" data-label="${r.name}" data-sub="${parts}">
+        ${r.name}<span class="sub">${parts}</span></div>`;
+    }).join('');
+    sugg.classList.add('show');
+    positionSuggestions();
+  },280);
+});
+
+/* список подсказок вынесен в fixed-слой поверх всего интерфейса,
+   поэтому его не перекрывают панели с backdrop-filter.
+   позиционируем его по координатам строки поиска */
+function positionSuggestions(){
+  const searchBox = document.querySelector('.search');
+  const r = searchBox.getBoundingClientRect();
+  sugg.style.left  = r.left + 'px';
+  sugg.style.width = r.width + 'px';
+  const listHeight = sugg.offsetHeight;
+  const spaceBelow = window.innerHeight - r.bottom;
+  // если снизу мало места, а сверху больше — показываем над полем
+  if(spaceBelow < listHeight + 16 && r.top > spaceBelow){
+    sugg.style.top = (r.top - listHeight - 8) + 'px';
+  }else{
+    sugg.style.top = (r.bottom + 8) + 'px';
+  }
+}
+window.addEventListener('resize',()=>{ if(sugg.classList.contains('show')) positionSuggestions(); });
+window.addEventListener('scroll',()=>{ if(sugg.classList.contains('show')) positionSuggestions(); }, true);
+
+sugg.addEventListener('click',e=>{
+  const div=e.target.closest('div[data-lat]');
+  if(!div)return;
+  sInput.value=div.dataset.label;
+  sugg.classList.remove('show');
+  setLocation(+div.dataset.lat,+div.dataset.lon,div.dataset.label,div.dataset.sub);
+});
+
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.search'))sugg.classList.remove('show');
+});
+
+async function doSearch(){
+  const q=sInput.value.trim();
+  if(!q)return;
+  sugg.classList.remove('show');
+  showStatus('Поиск города…');
+  const res=await geocode(q);
+  hideStatus();
+  if(res.length){
+    const r=res[0];
+    const sub=[r.admin1,r.country].filter(Boolean).join(', ');
+    setLocation(r.latitude,r.longitude,r.name,sub);
+  }else{showStatus('Город не найден');setTimeout(hideStatus,2200);}
+}
+$('searchBtn').onclick=doSearch;
+sInput.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+
+/* ---- Geolocation ---- */
+async function reverseName(lat,lon){
+  try{
+    const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?latitude=${lat}&longitude=${lon}&count=1&language=ru`);
+    const d=await r.json();
+    if(d.results&&d.results[0]){
+      const x=d.results[0];
+      return [x.name,[x.admin1,x.country].filter(Boolean).join(', ')];
+    }
+  }catch(e){}
+  return ['Моё местоположение',`${lat.toFixed(2)}, ${lon.toFixed(2)}`];
+}
+
+$('geoBtn').onclick=()=>{
+  if(!navigator.geolocation){showStatus('Геолокация не поддерживается');setTimeout(hideStatus,2200);return;}
+  showStatus('Определяем местоположение…');
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const {latitude,longitude}=pos.coords;
+    const [n,s]=await reverseName(latitude,longitude);
+    setLocation(latitude,longitude,n,s,10);
+  },err=>{
+    hideStatus();showStatus('Не удалось определить местоположение');setTimeout(hideStatus,2500);
+  },{enableHighAccuracy:false,timeout:8000});
+};
+
+/* ---- Init ---- */
+async function init(){
+  await loadRadar();
+  // обновляем радар каждые 5 минут
+  setInterval(loadRadar,5*60*1000);
+
+  // пробуем геолокацию, иначе — дефолтный город
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(async pos=>{
+      const {latitude,longitude}=pos.coords;
+      const [n,s]=await reverseName(latitude,longitude);
+      setLocation(latitude,longitude,n,s,10);
+    },()=>{
+      // отказ — берём Ригу по умолчанию (локация пользователя)
+      setLocation(56.95,24.11,'Рига','Латвия',9);
+    },{timeout:6000});
+  }else{
+    setLocation(56.95,24.11,'Рига','Латвия',9);
+  }
+}
+init();
+</script>
+</body>
+</html>
